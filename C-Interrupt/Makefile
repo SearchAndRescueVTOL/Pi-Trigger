@@ -1,9 +1,7 @@
 CC = gcc
 CFLAGS = -Wall -Wextra -std=c99
-
-LIBS = -lwiringPi
-
-TARGET = interrupt_program
+LIBS = -lgpiod
+TARGET = gpio_interrupt_program
 SRCS = Interrupt.c
 OBJS = $(SRCS:.c=.o)
 
@@ -14,5 +12,4 @@ $(TARGET): $(OBJS)
 	$(CC) $(CFLAGS) -c $< -o $@
 clean:
 	rm -f $(OBJS) $(TARGET)
-
 .PHONY: all clean run

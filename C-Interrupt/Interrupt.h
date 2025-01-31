@@ -1,13 +1,18 @@
 #ifndef INTERRUPT_H
 #define INTERRUPT_H
-#include <wiringPi.h>
+
+#include <gpiod.h>
 #include <stdio.h>
 #include <stdlib.h>
-#define GPIO_PIN 17
+#include <unistd.h>
 
-void gpio_interrupt(); // Interrupt Handler
+#define GPIO_CHIP "/dev/gpiochip0"  
+#define GPIO_PIN  17
 
-void setup_gpio();
+// Function to handle the GPIO interrupt
+void handle_gpio_interrupt();
 
+// Function to initialize GPIO and request events
+int setup_gpio_interrupt();
 
-#endif
+#endif 
