@@ -7,7 +7,7 @@
 #include <unistd.h>
 
 #define GPIO_CHIP "/dev/gpiochip0"  
-#define GPIO_PIN  17
+#define GPIO_PIN  4
 
 
 #endif 
