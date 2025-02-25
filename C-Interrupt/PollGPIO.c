@@ -1,134 +1,199 @@
-#define _GNU_SOURCE  // Required for CPU affinity functions
+// 1. Spawn a thread listening for pps event, 2 threads waiting on data to a
+// shared memory buffer, 1 consumer thread to that buffer that sends data over
+// to jetson
+// 2. On pps, this thread adds pps event to rgb and ir buffers, where threads
+// are waiting, they trigger the cameras and record tick time when images are
+// received/before sending trigger signal, then add results to buffer(s) for
+// consumer thread to send to jetson
+
+#define _GNU_SOURCE // Required for CPU affinity functions
 #include <pthread.h>
+#include <ros/ros.h>
+#include <sched.h>
 #include <stdlib.h>
 #include <unistd.h>
-#include <sched.h>
-// 1. Spawn a thread listening for pps event, 2 threads waiting on data to a shared memory buffer, 1 consumer thread to that buffer that sends data over to jetson
-// 2. On pps, this thread adds pps event to rgb and ir buffers, where threads are waiting, they trigger the cameras and record tick time when images are received/before sending trigger signal, then add results to buffer(s) for consumer thread to send to jetson
-#include <pigpio.h>
-#include <stdio.h>
-#include <stdatomic.h>
+
 #include <gst/gst.h> // Gstreamer
+#include <pigpio.h>
+#include <stdatomic.h>
+#include <stdbool.h>
+#include <stdio.h>
+
 #define DEFAULT_SAMPLE_RATE 1
+
 pthread_barrier_t barrier;
 uint32_t tickGlobal;
 atomic_bool tickReady = ATOMIC_VAR_INIT(true);
 int trigger_counter = 0;
 atomic_int recent_trigger_number = ATOMIC_VAR_INIT(0);
+
 void aFunction(int gpio, int level, uint32_t tick) {
-    /* only record low to high edges */
-    if (level == 1) {
-        trigger_counter += 1;
-        // RGB time
-        bool exp = true;
-        bool desired = false;
-        if (atomic_compare_exchange_strong(&tickReady, &exp, &desired)){
-            tickGlobal = tick;
-            atomic_store(&recent_trigger_number, trigger_counter);
-            return;
-        }
-        else{
-            return; // Drop frames when a trigger occurs while previous trigger still processing
-        }
+  pps_log = zlog_get_category("pps");
+  /* only record low to high edges */
+  if (level == 1) {
+    trigger_counter += 1;
+    // RGB time
+    bool exp = true, desired = false;
+    if (atomic_compare_exchange_strong(&tickReady, &exp, &desired)) {
+      tickGlobal = tick;
+      atomic_store(&recent_trigger_number, trigger_counter);
+      ROS_INFO("PPS Triggered at tick: %d, trigger_counter: %d", tick,
+               trigger_counter);
+      return;
+    } else {
+      ROSWARN("Trigger dropped at tick: %d, trigger_counter: %d (Previous "
+              "Trigger Still Processing)",
+              tick, trigger_counter);
+      return; // Drop frames when a trigger occurs while previous trigger still
+              // processing
     }
-    return;
+  }
+  return;
 }
 void set_cpu_affinity(int core_id) {
-    cpu_set_t cpuset;
-    CPU_ZERO(&cpuset);
-    CPU_SET(core_id, &cpuset); // Assign thread to core_id
-    if (pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t),&cpuset) != 0) {
-        perror("pthread_setaffinity_np");
-    }
-
+  cpu_set_t cpuset;
+  CPU_ZERO(&cpuset);
+  CPU_SET(core_id, &cpuset); // Assign thread to core_id
+  if (pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset) != 0) {
+    perror("pthread_setaffinity_np");
+  }
 }
 
-void *rgb_trigger(void *arg){
-    int thread_id = *(int *)arg;
-    set_cpu_affinity(thread_id);
-    while(true){
-        if (atomic_load(&tickReady) == false){
-            uint32_t tick = tickGlobal;
-            int trigger_num = atomic_load(&recent_trigger_number);
-            pthread_barrier_wait(&barrier);
-            // fucking actually trigger the camera here (im not writing this)
-            uint32_t endTick = gpioTick();
-            atomic_store(&tickReady, true);
-            // send image capture, start time, end time, trigger number associated with capture all together as a packet to httpserver
-        }
+void rgb_trigger(void *arg) {
+  int thread_id = *(int *)arg;
+  set_cpu_affinity(thread_id);
+
+  while (true) {
+    if (atomic_load(&tickReady) == false) {
+      uint32_t tick = tickGlobal;
+      int trigger_num = atomic_load(&recent_trigger_number);
+
+      ROS_INFO("RGB Triggered at tick: %d, trigger_counter: %d", tick,
+               trigger_num);
+      pthread_barrier_wait(&barrier);
+
+      // fucking actually trigger the camera here (im not writing this)
+
+      uint32_t endTick = gpioTick();
+      atomic_store(&tickReady, true);
+
+      ROS_INFO("RGB Trigger Complete: start_tick=%d, end_tick=%d, "
+               "duration=%dμs, tick_num=%d",
+               tick, endTick, endTick - tick, trigger_counter);
+
+      // send image capture, start time, end time, trigger number associated
+      // with capture all together as a packet to httpserver
     }
+  }
+  return;
+}
+
+void ir_trigger(void *arg) {
+
+  int thread_id = *(int *)arg;
+  set_cpu_affinity(thread_id);
+
+  while (true) {
+    if (!atomic_load(&tickReady)) {
+      uint32_t tick = tickGlobal;
+      int trigger_num = atomic_load(&recent_trigger_number);
+
+      ROS_INFO("IR Triggered at tick: %d, trigger_counter: %d", tick,
+               trigger_num);
+      pthread_barrier_wait(&barrier);
+
+      // fucking actually trigger the ir camera here
+
+      uint32_t endTick = gpioTick();
+      atomic_store(&tickReady, true);
+
+      ROS_INFO("IR Trigger Complete: start_tick=%d, end_tick=%d, "
+               "duration=%dμs, tick_num=%d",
+               tick, endTick, endTick - tick, trigger_counter);
+      // send image capture, start time, end time, trigger number associated
+      // with capture all together as a packet to httpserver
+    }
+  }
+  return;
+}
+void sendToJetson(void *arg) {
+  int thread_id = *(int *)arg;
+  set_cpu_affinity(thread_id);
+  return;
+}
+void conductor(void *arg) {
+
+  pthread_t rgb;
+  pthread_t ir;
+  pthread_t consume;
+  pthread_attr_t attr;
+  struct sched_param param;
+
+  set_cpu_affinity(2);
+  pthread_attr_init(&attr);
+  pthread_attr_setschedpolicy(&attr, SCHED_FIFO);
+  param.sched_priority = sched_get_priority_max(SCHED_FIFO);
+  pthread_attr_setschedparam(&attr, &param);
+
+  pthread_barrier_init(&barrier, NULL, 2);
+
+  int rgb_thread_id = 0, ir_thread_id = 1, consume_thread_id = 2;
+  if (pthread_create(&rgb, &attr, rgb_trigger, &rgb_thread_id) != 0) {
+    ROS_FATAL("Failed to create RGB thread");
     return;
-}
-
-void *ir_trigger(void *arg){
-    int thread_id = *(int *)arg;
-    set_cpu_affinity(thread_id);
-    while(true){
-        if (atomic_load(&tickReady) == false){
-            uint32_t tick = tickGlobal;
-            int trigger_num = atomic_load(&recent_trigger_number);
-            pthread_barrier_wait(&barrier);
-            // fucking actually trigger the ir camera here
-            uint32_t endTick = gpioTick();
-            atomic_store(&tickReady, true);
-            // send image capture, start time, end time, trigger number associated with capture all together as a packet to httpserver
-        }
-    }
+  }
+  if (pthread_create(&ir, &attr, ir_trigger, &ir_thread_id) != 0) {
+    ROS_FATAL("Failed to create IR thread");
     return;
-}
-void *sendToJetson(void *arg){
-    int thread_id = *(int *)arg;
-    set_cpu_affinity(thread_id);
+  }
+  if (pthread_create(&consume, NULL, sendToJetson, &consume_thread_id) != 0) {
+    ROS_FATAL("Failed to create Consume thread");
     return;
-}
-void *conductor(void *arg){
-    pthread_t rgb;
-    pthread_t ir;
-    pthread_t consume;
-    pthread_attr_t attr;
-    struct sched_param param;
-    set_cpu_affinity(2);
-    pthread_attr_init(&attr);
-    pthread_attr_setschedpolicy(&attr, SCHED_FIFO);
-    param.sched_priority = sched_get_priority_max(SCHED_FIFO);
-    pthread_attr_setschedparam(&attr, &param);
-    pthread_barrier_init(&barrier, NULL, 2);
-    int x = 0;
-    if (pthread_create(&rgb, &attr, rgb_trigger, &x) != 0) {
-        printf("Failed to create thread\n");
-        return;
-    }
-    int y = 1;
-    if (pthread_create(&ir, &attr, ir_trigger, &y) != 0){
-        printf("Failed to create thread\n");
-        return;
-    }
-    int z = 2;
-    if (pthread_create(&consume, NULL, sendToJetson, &z) != 0){
-        printf("Failed to create thread\n");
-        return;
-    }
+  }
 
-    gpioCfgClock(DEFAULT_SAMPLE_RATE, 1, 1);
-    if (gpioInitialise() < 0) {
-        return;
-    }
-    int mode;
-    
-    gpioWaveClear();
-    gpioSetMode(4, PI_INPUT); // for gpio pin 4 (broadcom numbered)
-    gpioSetAlertFunc(4, aFunction);    // for GPIO pin 4
-    while(1){ // maybe not needed depending on how the call back works (if it creates a seperate thread for the callback on gpio or not)
-        sleep(1);
-    }
-    gpioTerminate();
-    pthread_join(rgb, NULL);
-    pthread_join(ir, NULL);
-    pthread_join(consume, NULL);
-    pthread_attr_destroy(&attr);
-    return 0;
+  ROS_INFO("Conductor Threads Created");
+  ROS_INFO("Polling GPIO for PPS Events");
+
+  gpioCfgClock(DEFAULT_SAMPLE_RATE, 1, 1);
+  if (gpioInitialise() < 0) {
+    ROS_FATAL("Failed to initialize pigpio");
+    return;
+  }
+
+  int mode;
+
+  gpioWaveClear();
+  gpioSetMode(4, PI_INPUT);       // for gpio pin 4 (broadcom numbered)
+  gpioSetAlertFunc(4, aFunction); // for GPIO pin 4
+
+  while (1) { // maybe not needed depending on how the call back works (if it
+              // creates a seperate thread for the callback on gpio or not)
+    sleep(1);
+  }
+
+  gpioTerminate();
+  pthread_join(rgb, NULL);
+  pthread_join(ir, NULL);
+  pthread_join(consume, NULL);
+  pthread_attr_destroy(&attr);
+  ROS_INFO("Conductor Threads Terminated");
+  return 0;
 }
 int main() {
-    // oracle code here
-    return 0;
+  if (init_zlog_ros_logger(argc, argv) != 0) {
+    return -1; // Exit if initialization fails
+  }
+
+  conductor(NULL);
+
+  // Keep ROS node alive
+  ros::Rate loop_rate(10);
+  while (ros::ok()) {
+    ros::spinOnce();
+    loop_rate.sleep();
+  }
+
+  gpioTerminate();
+  ros::shutdown();
+  return 0;
 }
