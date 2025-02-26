@@ -5,7 +5,7 @@
 
 // Define GPIO chip and pin
 #define GPIO_CHIP "/dev/gpiochip0"
-#define GPIO_LINE 9
+#define GPIO_LINE 27
 #define TIMEOUT_SEC 1 // Timeout in seconds for non-blocking
 
 // Function prototypes
