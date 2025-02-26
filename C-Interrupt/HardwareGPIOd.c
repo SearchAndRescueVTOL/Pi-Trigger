@@ -76,7 +76,7 @@ void cleanup_gpio(struct gpiod_chip *chip, struct gpiod_line *line) {
 }
 
 
-int main() {
+int main(void) {
     struct gpiod_chip *chip = open_gpio_chip();
     struct gpiod_line *line = configure_gpio_interrupt(chip, GPIO_LINE);
     while(1){
