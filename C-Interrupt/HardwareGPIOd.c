@@ -23,7 +23,13 @@ struct gpiod_line* configure_gpio_interrupt(struct gpiod_chip *chip, int line_nu
         exit(EXIT_FAILURE);
     }
 
-    int ret = gpiod_line_request_events(line, GPIOD_LINE_REQUEST_BOTH_EDGES, "gpio_interrupt");
+    // Configure GPIO interrupt request
+    struct gpiod_line_request_config config;
+    config.consumer = "gpio_interrupt";
+    config.request_type = GPIOD_LINE_REQUEST_EVENT_BOTH_EDGES; // Corrected constant
+    config.flags = 0;  // No additional flags
+
+    int ret = gpiod_line_request(line, &config, 0);
     if (ret < 0) {
         perror("Failed to request GPIO line events");
         gpiod_chip_close(chip);
@@ -33,17 +39,24 @@ struct gpiod_line* configure_gpio_interrupt(struct gpiod_chip *chip, int line_nu
     return line;
 }
 
+
 // Function to handle GPIO interrupts in a non-blocking way
 void handle_gpio_interrupt(struct gpiod_line *line) {
     struct gpiod_line_event event;
     struct timespec timeout;
+    struct timespec ts;
     int ret;
 
     printf("Listening for GPIO %d interrupts (non-blocking)...\n", GPIO_LINE);
-
+    
+    
     while (1) {
         timeout.tv_sec = TIMEOUT_SEC;
         timeout.tv_nsec = 0;
+
+        timespec_get(&ts,TIME_UTC);
+
+       // struct tm *delta = gmtime(&ts.tv_nsec);
 
         ret = gpiod_line_event_wait(line, &timeout);
         if (ret < 0) {
@@ -61,10 +74,11 @@ void handle_gpio_interrupt(struct gpiod_line *line) {
         }
 
         if (event.event_type == GPIOD_LINE_EVENT_RISING_EDGE) {
-            printf("GPIO %d triggered! Type: RISING EDGE\n", GPIO_LINE);
-        } else if (event.event_type == GPIOD_LINE_EVENT_FALLING_EDGE) {
-            printf("GPIO %d triggered! Type: FALLING EDGE\n", GPIO_LINE);
-        }
+            //printf("GPIO %d triggered! Type: RISING EDGE at time %ld \n", GPIO_LINE, ts.tv_nsec);
+            printf("%lld \n",((long long)ts.tv_sec * 1000LL + ts.tv_nsec / 1000000LL));
+        } //else if (event.event_type == GPIOD_LINE_EVENT_FALLING_EDGE) {
+        //     printf("GPIO %d triggered! Type: FALLING EDGE at time %ld \n", GPIO_LINE, ts.tv_nsec);
+        // }
     }
 }
 
