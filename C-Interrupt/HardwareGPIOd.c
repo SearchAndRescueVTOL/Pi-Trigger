@@ -79,9 +79,10 @@ void cleanup_gpio(struct gpiod_chip *chip, struct gpiod_line *line) {
 int main() {
     struct gpiod_chip *chip = open_gpio_chip();
     struct gpiod_line *line = configure_gpio_interrupt(chip, GPIO_LINE);
-    
+    while(1){
     handle_gpio_interrupt(line);
-
     cleanup_gpio(chip, line);
+    //HAL_Delay(500);
+    }
     return 0;
 }
