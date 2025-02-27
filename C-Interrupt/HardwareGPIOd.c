@@ -181,7 +181,7 @@ void *handle_gpio_interrupt(void *arg) {
 
         if (event.event_type == GPIOD_LINE_EVENT_RISING_EDGE) {
             //printf("GPIO %d triggered! Type: RISING EDGE at time %ld \n", GPIO_LINE, ts.tv_nsec);
-            long long tick =  ((long long)ts.tv_sec * 1000LL + ts.tv_nsec / 1000000LL);
+            long long tick =  ((long long)ts.tv_sec * 1000000000LL + ts.tv_nsec);
             fprintf(fd, "%lld \n", tick);
 	        fflush(fd);
             trigger_counter += 1;
