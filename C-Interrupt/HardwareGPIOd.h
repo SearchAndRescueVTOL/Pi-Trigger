@@ -13,7 +13,7 @@ struct gpiod_chip* open_gpio_chip();
 struct gpiod_line* configure_gpio_interrupt(struct gpiod_chip *chip, int line_number);
 
 
-void handle_gpio_interrupt(struct gpiod_line *line);
+void *handle_gpio_interrupt(void *arg);
 
 void cleanup_gpio(struct gpiod_chip *chip, struct gpiod_line *line);
 
