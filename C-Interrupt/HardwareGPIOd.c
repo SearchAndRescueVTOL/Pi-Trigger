@@ -47,8 +47,13 @@ void handle_gpio_interrupt(struct gpiod_line *line) {
     struct timespec ts;
     int ret;
 
-    printf("Listening for GPIO %d interrupts (non-blocking)...\n", GPIO_LINE);
     
+    FILE *fd = fopen("output.txt", "w");
+    if (fd == NULL){
+	    perror("Failed to open file");
+    }
+//fprintf(fd, "Listening for GPIO %d interrupts (non-blocking)...\n", GPIO_LINE);
+    fflush(fd);
     
     while (1) {
         timeout.tv_sec = TIMEOUT_SEC;
@@ -63,7 +68,8 @@ void handle_gpio_interrupt(struct gpiod_line *line) {
             perror("Error waiting for GPIO event");
             break;
         } else if (ret == 0) {
-            printf("No GPIO event detected within %d seconds. Continuing...\n", TIMEOUT_SEC);
+            //fprintf(fd, "No GPIO event detected within %d seconds. Continuing...\n", TIMEOUT_SEC);
+	    fflush(fd);
             continue;
         }
 
@@ -75,7 +81,8 @@ void handle_gpio_interrupt(struct gpiod_line *line) {
 
         if (event.event_type == GPIOD_LINE_EVENT_RISING_EDGE) {
             //printf("GPIO %d triggered! Type: RISING EDGE at time %ld \n", GPIO_LINE, ts.tv_nsec);
-            printf("%lld \n",((long long)ts.tv_sec * 1000LL + ts.tv_nsec / 1000000LL));
+            fprintf(fd, "%lld \n",((long long)ts.tv_sec * 1000LL + ts.tv_nsec / 1000000LL));
+	    fflush(fd);
         } //else if (event.event_type == GPIOD_LINE_EVENT_FALLING_EDGE) {
         //     printf("GPIO %d triggered! Type: FALLING EDGE at time %ld \n", GPIO_LINE, ts.tv_nsec);
         // }
@@ -93,6 +100,7 @@ void cleanup_gpio(struct gpiod_chip *chip, struct gpiod_line *line) {
 int main(void) {
     struct gpiod_chip *chip = open_gpio_chip();
     struct gpiod_line *line = configure_gpio_interrupt(chip, GPIO_LINE);
+
     while(1){
         handle_gpio_interrupt(line);
         cleanup_gpio(chip, line);
