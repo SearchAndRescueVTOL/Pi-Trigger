@@ -16,13 +16,13 @@ atomic_bool tickReady = ATOMIC_VAR_INIT(true);
 int trigger_counter = 0;
 uint32_t prev_tick = 0;
 atomic_int recent_trigger_number = ATOMIC_VAR_INIT(0);
+FILE *fd;
 void aFunction(int gpio, int level, uint32_t tick) {
   /* only record low to high edges */
   if (level == 1) {
     trigger_counter += 1;
-    printf("Trigger Happened\n");
-	printf("Trigger %d\n", trigger_counter);
-	printf("Time: %d\n", tick);
+    fprintf(fd, "%llu \n", (unsigned long long) tick);
+    fflush(fd);
 	// RGB time
     bool exp = true;
     bool desired = false;
@@ -42,7 +42,7 @@ void set_cpu_affinity(int core_id) {
   CPU_ZERO(&cpuset);
   CPU_SET(core_id, &cpuset); // Assign thread to core_id
   if (pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t),&cpuset) != 0) {
-    perror("pthread_setaffinity_np");
+    printf("Error getting affinity!\n");
   }
 }
 void *rgb_trigger(void *arg){
@@ -88,7 +88,7 @@ void *conductor(void *arg){
   pthread_t consume;
   pthread_attr_t attr;
   struct sched_param param;
-  set_cpu_affinity(2);
+  set_cpu_affinity(3);
   pthread_attr_init(&attr);
   pthread_attr_setschedpolicy(&attr, SCHED_FIFO);
   param.sched_priority = sched_get_priority_max(SCHED_FIFO);
@@ -99,16 +99,19 @@ void *conductor(void *arg){
     printf("Failed to create thread\n");
     return;
   }
+  usleep(1000);
   int y = 1;
   if (pthread_create(&ir, &attr, ir_trigger, &y) != 0){
     printf("Failed to create thread\n");
     return;
   }
+  usleep(1000);
   int z = 2;
   if (pthread_create(&consume, NULL, sendToJetson, &z) != 0){
     printf("Failed to create thread\n");
     return;
   }
+  usleep(1000);
   gpioTerminate();
   gpioCfgClock(DEFAULT_SAMPLE_RATE, 1, 1);
   if (gpioInitialise() < 0) {
@@ -130,13 +133,26 @@ void *conductor(void *arg){
 }
 int main() {
 	// oracle code here
-   	
-	pthread_t con;
-	if (pthread_create(&con, NULL, conductor, NULL) != 0){
-		printf("Error\n");
-		return 1;
-	}
-	pthread_join(con, NULL);
+  fd = fopen("output.txt", "w");
+  if (fd == NULL){
+    perror("Failed to open file\n");
+  }
+  fflush(fd);
+  pthread_t con;
+  pthread_attr_t attr;
+  struct sched_param param;
+  pthread_attr_init(&attr);
+  pthread_attr_setschedpolicy(&attr, SCHED_FIFO);
+  param.sched_priority = sched_get_priority_max(SCHED_FIFO);
+  pthread_attr_setschedparam(&attr, &param);
+  if (pthread_create(&con, &attr, conductor, NULL) != 0){
+    printf("Error\n");
+    return 1;
+  }
+  usleep(1000);
+  pthread_attr_destroy(&attr);
+  pthread_join(con, NULL);
+
 	return 0;
 }
 
