@@ -3,13 +3,12 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <sched.h>
-// 1. Spawn a thread listening for pps event, 2 threads waiting on data to a shared memory buffer, 1 consumer thread to that buffer that sends data over to jetson
-// 2. On pps, this thread adds pps event to rgb and ir buffers, where threads are waiting, they trigger the cameras and record tick time when images are received/before sending trigger signal, then add results to buffer(s) for consumer thread to send to jetson
 #include <pigpio.h>
 #include <stdio.h>
 #include <stdatomic.h>
 #include <stdbool.h>
 #define DEFAULT_SAMPLE_RATE 1
+#define OUTPUT_FILE_NAME "output.txt"
 pthread_barrier_t barrier;
 uint32_t tickGlobal;
 atomic_bool tickReady = ATOMIC_VAR_INIT(true);
@@ -133,7 +132,7 @@ void *conductor(void *arg){
 }
 int main() {
 	// oracle code here
-  fd = fopen("output.txt", "w");
+  fd = fopen(OUTPUT_FILE_NAME, "w");
   if (fd == NULL){
     perror("Failed to open file\n");
   }
