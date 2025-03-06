@@ -1,6 +1,6 @@
 CC = gcc
 CFLAGS = -Wall -Wextra -std=c11
-LIBS = -lpigpio -pthread
+LIBS = -lpigpio -pthread $(pkg-config --cflags --libs gstreamer-1.0)
 TARGET = gpio_interrupt_program
 SRCS = PollGPIO.c
 OBJS = $(SRCS:.c=.o)
