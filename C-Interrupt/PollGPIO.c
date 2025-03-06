@@ -8,6 +8,8 @@
 #include <stdatomic.h>
 #include <stdbool.h>
 #include <gst/gst.h>
+#include <gst/app/gstappsink.h>
+#include <gst/app/gstappsrc.h>
 #define DEFAULT_SAMPLE_RATE 1
 #define OUTPUT_FILE_NAME "output.txt"
 pthread_barrier_t barrier;
