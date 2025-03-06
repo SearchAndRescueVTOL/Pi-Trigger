@@ -17,6 +17,8 @@ int trigger_counter = 0;
 uint32_t prev_tick = 0;
 atomic_int recent_trigger_number = ATOMIC_VAR_INIT(0);
 FILE *fd;
+GstElement *pipeline, *src, *jpegenc, *appsink;
+GMainLoop *loop;
 void aFunction(int gpio, int level, uint32_t tick) {
   /* only record low to high edges */
   if (level == 1) {
@@ -46,6 +48,9 @@ void set_cpu_affinity(int core_id) {
   }
 }
 void *rgb_trigger(void *arg){
+  GstSample *sample;
+  GstBuffer *buffer;
+  GstMapInfo map;
   int thread_id = *(int *)arg;
   set_cpu_affinity(thread_id);
   while(true){
@@ -53,10 +58,21 @@ void *rgb_trigger(void *arg){
       uint32_t tick = tickGlobal;
       int trigger_num = atomic_load(&recent_trigger_number);
       pthread_barrier_wait(&barrier);
+      sample = gst_app_sink_pull_sample(GST_APP_SINK(appsink));
+      if (!sample) {
+          g_printerr("Failed to pull sample from appsink\n");
+          return;
+      }
+      buffer = gst_sample_get_buffer(sample);
+      gst_buffer_map(buffer, &map, GST_MAP_READ);
+      // map.data = image data/field data
+      // map.size = field size
       // fucking actually trigger the camera here (im not writing this)
       uint32_t endTick = gpioTick();
       atomic_store(&tickReady, true);
       // send image capture, start time, end time, trigger number associated with capture all together as a packet to httpserver
+      gst_buffer_unmap(buffer, &map);
+      gst_sample_unref(sample);
     }
   }
   return;
@@ -131,8 +147,23 @@ void *conductor(void *arg){
   pthread_attr_destroy(&attr);
   return 0;
 }
-int main() {
+int main(int argc, char *argv[]) {
 	// oracle code here
+  gst_init(&argc, &argv);
+  pipeline = gst_parse_launch("libcamerasrc ! video/x-raw,format=RGB,width=4056,height=3040,framerate=30/1 ! jpegenc ! appsink name=appsink sync=false", NULL);
+  if (!pipeline) {
+    g_printerr("Failed to create pipeline\n");
+    return -1;
+  }
+  appsink = gst_bin_get_by_name(GST_BIN(pipeline), "appsink");
+  if (!appsink) {
+    g_printerr("Failed to get appsink element\n");
+    return -1;
+  }
+  gst_element_set_state(pipeline, GST_STATE_PLAYING);
+  loop = g_main_loop_new(NULL, FALSE);
+  g_main_loop_run(loop);
+
   fd = fopen(OUTPUT_FILE_NAME, "w");
   if (fd == NULL){
     perror("Failed to open file\n");
@@ -152,7 +183,11 @@ int main() {
   usleep(1000);
   pthread_attr_destroy(&attr);
   pthread_join(con, NULL);
-
+  gst_element_set_state(pipeline, GST_STATE_NULL);
+  gst_object_unref(pipeline);
+  curl_easy_cleanup(curl);
+  g_main_loop_unref(loop);
+  curl_global_cleanup();
 	return 0;
 }
 
