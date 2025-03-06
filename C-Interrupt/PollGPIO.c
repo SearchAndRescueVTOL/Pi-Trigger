@@ -17,7 +17,7 @@ int trigger_counter = 0;
 uint32_t prev_tick = 0;
 atomic_int recent_trigger_number = ATOMIC_VAR_INIT(0);
 FILE *fd;
-GstElement *pipeline, *src, *jpegenc, *appsink;
+GstElement *pipeline, *src, *jpegenc, *appsink, *display_pipeline, *appsrc;
 GMainLoop *loop;
 void aFunction(int gpio, int level, uint32_t tick) {
   /* only record low to high edges */
@@ -65,9 +65,16 @@ void *rgb_trigger(void *arg){
       }
       buffer = gst_sample_get_buffer(sample);
       gst_buffer_map(buffer, &map, GST_MAP_READ);
+      if (map.data) {
+        GstBuffer *new_buffer = gst_buffer_new_allocate(NULL, map.size, NULL);
+        gst_buffer_fill(new_buffer, 0, map.data, map.size);
+        // Push buffer into appsrc for display
+        gst_app_src_push_buffer(GST_APP_SRC(appsrc), new_buffer);
+      }
       // map.data = image data/field data
       // map.size = field size
       // fucking actually trigger the camera here (im not writing this)
+      
       uint32_t endTick = gpioTick();
       atomic_store(&tickReady, true);
       // send image capture, start time, end time, trigger number associated with capture all together as a packet to httpserver
@@ -160,7 +167,10 @@ int main(int argc, char *argv[]) {
     g_printerr("Failed to get appsink element\n");
     return -1;
   }
+  display_pipeline = gst_parse_launch("appsrc name=appsrc format=time is-live=true ! videoconvert ! glimagesink", NULL);
+  appsrc = gst_bin_get_by_name(GST_BIN(display_pipeline), "appsrc");
   gst_element_set_state(pipeline, GST_STATE_PLAYING);
+  gst_element_set_state(display_pipeline, GST_STATE_PLAYING);
   loop = g_main_loop_new(NULL, FALSE);
   g_main_loop_run(loop);
 
@@ -184,10 +194,10 @@ int main(int argc, char *argv[]) {
   pthread_attr_destroy(&attr);
   pthread_join(con, NULL);
   gst_element_set_state(pipeline, GST_STATE_NULL);
+  gst_element_set_state(display_pipeline, GST_STATE_NULL);
   gst_object_unref(pipeline);
-  curl_easy_cleanup(curl);
+  gst_object_unref(display_pipeline);
   g_main_loop_unref(loop);
-  curl_global_cleanup();
 	return 0;
 }
 
